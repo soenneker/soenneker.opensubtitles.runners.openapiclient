@@ -12,6 +12,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Soenneker.Extensions.ValueTask;
+using Soenneker.OpenApi.Fixer.Abstract;
 using Soenneker.Utils.Directory.Abstract;
 using Soenneker.Utils.File.Abstract;
 using Soenneker.Utils.File.Download.Abstract;
@@ -27,18 +28,20 @@ public sealed class FileOperationsUtil : IFileOperationsUtil
     private readonly IGitUtil _gitUtil;
     private readonly IDotnetUtil _dotnetUtil;
     private readonly IProcessUtil _processUtil;
+    private readonly IOpenApiFixer _openApiFixer;
     private readonly IFileDownloadUtil _fileDownloadUtil;
     private readonly IFileUtil _fileUtil;
     private readonly IDirectoryUtil _directoryUtil;
 
     public FileOperationsUtil(ILogger<FileOperationsUtil> logger, IConfiguration configuration, IGitUtil gitUtil, IDotnetUtil dotnetUtil, IProcessUtil processUtil, 
-        IFileDownloadUtil fileDownloadUtil, IFileUtil fileUtil, IDirectoryUtil directoryUtil)
+        IOpenApiFixer openApiFixer, IFileDownloadUtil fileDownloadUtil, IFileUtil fileUtil, IDirectoryUtil directoryUtil)
     {
         _logger = logger;
         _configuration = configuration;
         _gitUtil = gitUtil;
         _dotnetUtil = dotnetUtil;
         _processUtil = processUtil;
+        _openApiFixer = openApiFixer;
         _fileDownloadUtil = fileDownloadUtil;
         _fileUtil = fileUtil;
         _directoryUtil = directoryUtil;
@@ -57,14 +60,22 @@ public sealed class FileOperationsUtil : IFileOperationsUtil
         string? filePath = await _fileDownloadUtil.Download(openApiDocumentUrl,
             targetFilePath, fileExtension: ".json", cancellationToken: cancellationToken);
 
+        if (string.IsNullOrWhiteSpace(filePath))
+            throw new InvalidOperationException($"Unable to download the OpenAPI document from '{openApiDocumentUrl}'.");
+
         await _processUtil.Start("dotnet", null, "tool update --global Microsoft.OpenApi.Kiota", waitForExit: true, cancellationToken: cancellationToken);
+
+        string fixedFilePath = Path.Combine(gitDirectory, "fixed.json");
+
+        await _openApiFixer.Fix(filePath, fixedFilePath, cancellationToken)
+                           .NoSync();
 
         string srcDirectory = Path.Combine(gitDirectory, "src", Constants.Library);
 
         await DeleteAllExceptCsproj(srcDirectory, cancellationToken);
 
-        await _processUtil.Start("kiota", gitDirectory, $"kiota generate -l CSharp -d \"{filePath}\" -o src/{Constants.Library} -c OpenSubtitlesOpenApiClient -n {Constants.Library}",
-            waitForExit: true, cancellationToken: cancellationToken).NoSync();
+        await _openApiFixer.GenerateKiota(fixedFilePath, "OpenSubtitlesOpenApiClient", Constants.Library, gitDirectory, cancellationToken)
+                           .NoSync();
 
         await BuildAndPush(gitDirectory, cancellationToken).NoSync();
     }
