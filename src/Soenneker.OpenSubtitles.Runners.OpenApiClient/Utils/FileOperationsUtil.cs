@@ -28,21 +28,19 @@ public sealed class FileOperationsUtil : IFileOperationsUtil
     private readonly IConfiguration _configuration;
     private readonly IGitUtil _gitUtil;
     private readonly IDotnetUtil _dotnetUtil;
-    private readonly IProcessUtil _processUtil;
     private readonly IKiotaUtil _kiotaUtil;
     private readonly IOpenApiFixer _openApiFixer;
     private readonly IFileDownloadUtil _fileDownloadUtil;
     private readonly IFileUtil _fileUtil;
     private readonly IDirectoryUtil _directoryUtil;
 
-    public FileOperationsUtil(ILogger<FileOperationsUtil> logger, IConfiguration configuration, IGitUtil gitUtil, IDotnetUtil dotnetUtil, IProcessUtil processUtil, 
+    public FileOperationsUtil(ILogger<FileOperationsUtil> logger, IConfiguration configuration, IGitUtil gitUtil, IDotnetUtil dotnetUtil,
         IOpenApiFixer openApiFixer, IFileDownloadUtil fileDownloadUtil, IFileUtil fileUtil, IDirectoryUtil directoryUtil, IKiotaUtil kiotaUtil)
     {
         _logger = logger;
         _configuration = configuration;
         _gitUtil = gitUtil;
         _dotnetUtil = dotnetUtil;
-        _processUtil = processUtil;
         _kiotaUtil = kiotaUtil;
         _openApiFixer = openApiFixer;
         _fileDownloadUtil = fileDownloadUtil;
@@ -66,8 +64,6 @@ public sealed class FileOperationsUtil : IFileOperationsUtil
         if (string.IsNullOrWhiteSpace(filePath))
             throw new InvalidOperationException($"Unable to download the OpenAPI document from '{openApiDocumentUrl}'.");
 
-        await _kiotaUtil.EnsureInstalled(cancellationToken);
-
         string fixedFilePath = Path.Combine(gitDirectory, "fixed.json");
 
         await _openApiFixer.Fix(filePath, fixedFilePath, cancellationToken)
@@ -77,7 +73,9 @@ public sealed class FileOperationsUtil : IFileOperationsUtil
 
         await DeleteAllExceptCsproj(srcDirectory, cancellationToken);
 
-        await _openApiFixer.GenerateKiota(fixedFilePath, "OpenSubtitlesOpenApiClient", Constants.Library, gitDirectory, cancellationToken)
+        await _kiotaUtil.EnsureInstalled(cancellationToken);
+
+        await _kiotaUtil.Generate(fixedFilePath, "OpenSubtitlesOpenApiClient", Constants.Library, gitDirectory, cancellationToken)
                            .NoSync();
 
         await BuildAndPush(gitDirectory, cancellationToken).NoSync();
